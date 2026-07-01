@@ -27,14 +27,14 @@ sudo netplan apply
 
 ### 호스트네임(컴퓨터 이름) 수정
 ``` Bash
+# (※ -s 뒤에 f를 붙이면 기존에 파일이 있든 없든 무시하고 강제로 새로 연결합니다.)
 sudo hostnamectl set-hostname kafka-broker01 ~ 3
 
 ```
 
 ### 고유 머신 ID 새로 발급
 ```Bash
-sudo systemd-machine-id-setup
-sudo ln -s /etc/machine-id /var/lib/dbus/machine-id
+sudo ln -sf /etc/machine-id /var/lib/dbus/machine-id
 ```
 
 ### 원본 이름으로 적힌 부분을 kafka-broker0x 로 수정
