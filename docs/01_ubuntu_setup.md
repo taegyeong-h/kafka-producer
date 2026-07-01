@@ -45,8 +45,20 @@ sudo nano /etc/hosts
 
 ## 패키지 리스트 업데이트
 ```bash
-  sudo apt update
-  sudo apt upgrade -y
+sudo apt update
+sudo apt upgrade -y
+sudo apt install python3-pip python3-venv software-properties-common -y
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt update
+
+# 2. 내 프로젝트 폴더로 이동한 뒤 가상환경을 생성합니다. (폴더명은 .venv를 추천합니다)
+mkdir kafka-project && cd kafka-project
+python3 -m venv .venv
+
+# 3. 생성한 가상환경 방으로 입장(활성화)합니다.
+source .venv/bin/activate
+
+(.venv) ubuntu@kafka-broker03:~/kafka-project$
 ```
 
 ## 공통 유틸리티 및 SSH 서버 설치
