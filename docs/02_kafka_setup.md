@@ -28,22 +28,20 @@ ubuntu@kafka-broker03:~$ ping -c 3 kafka-broker01 ~ 3
 
 ```
 
+#### kafka 1번 서버
+``` bash
+1. 처음에 토픽 목록 확인 (아무것도 없어서 빈 줄만 출력됨)
+kafka-topics --bootstrap-server kafka-broker01:9092,kafka-broker02:9092,kafka-broker03:9092 --list
 
+# 2. 'test.hello'라는 이름의 토픽 생성
+kafka-topics --bootstrap-server kafka-broker01:9092,kafka-broker02:9092,kafka-broker03:9092 --create --topic test.hello
 
-## timedatectl 설정
-**카프카는 시간(Timestamp)에 엄청나게 집착하는 프로그램이기에 시간을 맞춰줘야 한다**
-```bash
-sudo timedatectl set-timezone Asia/Seoul
-timedatectl
-               Local time: Wed 2026-07-01 15:01:28 KST
-           Universal time: Wed 2026-07-01 06:01:28 UTC
-                 RTC time: Wed 2026-07-01 06:01:28
-                **Time zone: Asia/Seoul (KST, +0900)**
-System clock synchronized: yes
-              NTP service: active
-          RTC in local TZ: no
+# 3. 다시 토픽 목록 확인 ('test.hello'가 출력됨)
+kafka-topics --bootstrap-server kafka-broker01:9092,kafka-broker02:9092,kafka-broker03:9092 --list
 ```
 
-## setting_python_env
-
-sudo apt install software-properties-common
+#### kafka 2,3 번 서버
+``` bash
+# 1번에서 만든 토픽이 여기서도 똑같이 보이는지 확인!
+kafka-topics --bootstrap-server kafka-broker01:9092,kafka-broker02:9092,kafka-broker03:9092 --list
+```
