@@ -199,7 +199,7 @@ Topic: homework.ch4-5.ptt5-3    TopicId: Y4s2NpipTBmC3yMONb9f3A PartitionCount: 
         Topic: homework.ch4-5.ptt5-3    Partition: 4    Leader: 3       Replicas: 3,2,1 Isr: 3,2,1      Elr:    LastKnownElr:
 
 
-        
+**브로커가 3개인데 3개 초과시 Broker 서버의 대수보다 많아 토픽을 생성할 수 없다는 에러가 나옴**
 
 
 
