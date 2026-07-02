@@ -1,13 +1,14 @@
 
+# 🚊 서울 지하철 파이프라인: 3대 카프카 브로커 클러스터 (KRaft 모드) 구축 가이드
 
-## 카프카 3대 서버의 클러스터 매핑 정보 설정
+> [!IMPORTANT]
+> 본 가이드는 주키퍼(Zookeeper) 없이 자체 합의 알고리즘으로 구동되는 최신 **KRaft(Kafka Raft) 모드** 기준 분산 인프라 설정 명세서입니다.
 
-#### etc/hosts
+### 01_etc/hosts
 ```bash
 127.0.0.1       localhost
-127.0.1.1       kafka-broker0x       # <-- 자기 자신 이름
 
-# 카프카 클러스터 (3대 모두 동일하게 복사)
+# 카프카 분산 클러스터 진짜 고속도로 개통 (3대 모두 동일하게 복사)
 192.168.56.100  kafka-broker01
 192.168.56.101  kafka-broker02
 192.168.56.102  kafka-broker03
@@ -28,179 +29,108 @@ ubuntu@kafka-broker03:~$ ping -c 3 kafka-broker01 ~ 3
 
 ```
 
-### 3대 서버 파일 설정 수정
-```bash
-**vim ~/confluent-8.3.0/etc/kafka/server.properties**
-**kafka-broker01**
-
-process.roles=broker,controller
-node.id=1
-#controller.quorum.bootstrap.servers=localhost:9093
-controller.quorum.voters=1@kafka-broker01:9093,2@kafka-broker02:9093,3@kafka-broker03:9093
-
-#advertised.listeners=PLAINTEXT://localhost:9092,CONTROLLER://localhost:9093
-advertised.listeners=PLAINTEXT://kafka-broker01:9092,CONTROLLER://kafka-broker01:9093
-
-# [수정] 2번 서버니까 ID를 2로 바꿉니다.
-**kafka-broker02**
-node.id=2
-process.roles=broker,controller
-
-# [수정] bootstrap은 주석처리!
-#controller.quorum.bootstrap.servers=localhost:9093
-controller.quorum.voters=1@kafka-broker01:9093,2@kafka-broker02:9093,3@kafka-broker03:9093
-
-# [수정] 다른 컴퓨터가 나(2번)를 찾아올 수 있게 주소를 kafka-broker02로 바꿉니다.
-#advertised.listeners=PLAINTEXT://localhost:9092,CONTROLLER://localhost:9093
-advertised.listeners=PLAINTEXT://kafka-broker02:9092,CONTROLLER://kafka-broker02:9093
+### 3대 브로커 서버 환경 설정
 
 
-# [수정] 3번 서버니까 ID를 3로 바꿉니다.
-**kafka-broker03**
-node.id=3
-process.roles=broker,controller
+#### 💾 1. 리눅스 `/tmp` 저장소 해제 및 영구 경로 변경
 
-# [수정] bootstrap은 주석처리!
-#controller.quorum.bootstrap.servers=localhost:9093
-controller.quorum.voters=1@kafka-broker01:9093,2@kafka-broker02:9093,3@kafka-broker03:9093
+> [!NOTE]
+> **왜 경로를 변경해야 하나요?**
+> 리눅스(Ubuntu) 시스템은 컴퓨터가 재부팅될 때 `/tmp` 폴더 내부를 자동으로 싹 청소(Format)해 버리는 고약한 버릇이 있습니다. 
+> 여기에 카프카 장부를 그대로 두면 **재부팅 시 카프카가 마스터 도장(UUID)을 잃어버리고 즉사**하게 되므로, 반드시 영구 보존이 가능한 사용자의 홈 디렉토리(`~/data/...`) 하위로 격리해야 합니다.
 
-# [수정] 다른 컴퓨터가 나(2번)를 찾아올 수 있게 주소를 kafka-broker02로 바꿉니다.
-#advertised.listeners=PLAINTEXT://localhost:9092,CONTROLLER://localhost:9093
-advertised.listeners=PLAINTEXT://kafka-broker03:9092,CONTROLLER://kafka-broker03:9093
+각 가상머신 서버의 `~/confluent-8.3.0/etc/kafka/server.properties` 파일을 열고 아래와 같이 저장소 경로를 영구 경로로 수정합니다.
 
-kafka-server 1,2,3 공통
-~/confluent-8.3.0/bin/kafka-server-start ~/confluent-8.3.0/etc/kafka/server.properties
+```diff
+# server.properties 수정 항목
+- log.dirs=/tmp/kraft-combined-logs
++ log.dirs=/home/ubuntu/data/kafka-logs
 ```
 
-#### kafka 
-``` bash
+> [!NOTE]
+> **💡 각 서버별 필수 치환 항목 (1~3번 서버 각각 다르게 설정)**
+> * **`node.id`:** 각 서버 번호에 맞게 수정 각 서버별로 중복되지 않는 고유 정수 숫자를 지정 (예: `1`, `2`, `3`,`100`, `101`, `102`)
+> * **`advertised.listeners`:** 주소 중간의 이름표를 자기 호스트네임에 맞게 치환 
+>   * *(예: 2번 서버는 `kafka-broker02`, 3번 서버는 `kafka-broker03`)*
 
-1단계: 클러스터 비밀번호(UUID) 발급받기 (1번 서버에서만 딱 1번 실행)
-- 3대의 카프카 서버를 하나의 팀으로 묶어줄 고유한 ID 카드를 발급받는 과정입니다. 1번 서버 터미널에 아래 명령어를 입력하세요.
+```diff
+# [필수 수정] IP 뒷자리 매핑 정석 적용 (1번 서버: 100, 2번 서버: 101, 3번 서버: 102)
+node.id=100
+process.roles=broker,controller
+
+# 쿼럼(합의체) 투표권자 명부 등록 (3대 삼형제 주소록 바인딩)
+- controller.quorum.bootstrap.servers=localhost:9093
++ controller.quorum.voters=100@kafka-broker01:9093,101@kafka-broker02:9093,102@kafka-broker03:9093
+
+# 외부(윈도우 호스트/옆방 가상머신) 통신용 외부 노출 주소 선언
+- advertised.listeners=PLAINTEXT://localhost:9092,CONTROLLER://localhost:9093
++ advertised.listeners=PLAINTEXT://kafka-broker01:9092,CONTROLLER://kafka-broker01:9093
+```
+#### 🔑 3. KRaft 마스터 클러스터 ID(UUID) 생성 및 포맷팅
+
+> [!WARNING]
+> **🚨 반드시 1번 서버(`kafka-broker01`) 터미널에서만 '딱 1번' 실행하세요!**
+> 3대의 카프카 서버를 하나의 팀(클러스터)으로 묶어줄 고유한 주민등록번호를 발급받는 과정입니다. 2, 3번 서버에서 이 명령어를 중복 실행하면 클러스터가 쪼개져 통곡의 벽에 갇히게 됩니다.
+
+1번 서버 터미널에 아래 명령어를 입력하여 무작위 UUID 도장을 발행합니다.
+
+```bash
+# Confluent 8.3.0+ 최신 버전 규격 명령어
 ~/confluent-8.3.0/bin/kafka-storage random-uuid
-Oe6T-YusRpO6D0OIAD08gw
+```
 
-2단계: 3대 서버 각각 포맷하기 (1, 2, 3번 서버 모두 각각 실행)
-아까 발급받으신 진짜 UUID인 Oe6T-YusRpO6D0OIAD08gw를 사용해 3대의 서버 저장 공간을 각각 포맷합니다. 3대 서버 터미널에 각각 붙여넣으세요.
-~/confluent-8.3.0/bin/kafka-storage format -t Oe6T-YusRpO6D0OIAD08gw -c ~/confluent-8.3.0/etc/kafka/server.properties
+* **출력 예시:** `rgEz4HuGQnGnNk5y9onTzQ` (위 명령어로 출력된 긴 문자열을 복사하여 다음 단계에 사용합니다.)
+
+
+### ② 발행된 UUID로 3대 서버 장부 포맷팅 (3대 서버 각각 모두 실행)
+
+> [!NOTE]
+> **💡 왜 3대 서버를 모두 포맷(`format`)해야 하나요?**
+> 1단계에서 발급받은 UUID 도장은 우리 삼형제를 하나의 클러스터 팀으로 묶어주는 **'가족 결합 도장'**입니다. 
+> 3대의 가상머신 서버 각각에 이 도장을 들고 들어가 포맷팅을 처리해 주어야, 카프카 엔진이 **자네가 지정한 안전한 영구 경로(`~/data/kraft-combined-logs`)에 장부 폴더를 하위까지 100% 자동으로 생성**하고, 그 안에 "우리는 한 팀이다!"라는 메타데이터 서류를 안전하게 박제하게 됩니다.
+
+1, 2, 3번 가상머신 터미널 각각에 접속하여, 위에서 복사한 진짜 UUID 값을 `-t` 뒤에 넣고 아래 포맷 명령어를 각각 실행합니다.
 
 ```bash
- ~/confluent-8.3.0/bin/kafka-storage format -t Oe6T-YusRpO6D0OIAD08gw -c ~/confluent-8.3.0/etc/kafka/server.properties
+# <주의> 발급받은 진짜 UUID 주소(rgEz4...)를 넣고 실행하세요!
+~/confluent-8.3.0/bin/kafka-storage format -t rgEz4HuGQnGnNk5y9onTzQ -c ~/confluent-8.3.0/etc/kafka/server.properties
+
+* **출력 예시:**
 Bootstrap metadata: BootstrapMetadata(records=[ApiMessageAndVersion(FeatureLevelRecord(name='metadata.version', featureLevel=30) at version 0), ApiMessageAndVersion(FeatureLevelRecord(name='eligible.leader.replicas.version', featureLevel=1) at version 0), ApiMessageAndVersion(FeatureLevelRecord(name='group.version', featureLevel=1) at version 0), ApiMessageAndVersion(FeatureLevelRecord(name='share.version', featureLevel=1) at version 0), ApiMessageAndVersion(FeatureLevelRecord(name='streams.version', featureLevel=1) at version 0), ApiMessageAndVersion(FeatureLevelRecord(name='transaction.version', featureLevel=2) at version 0)], metadataVersionLevel=30, source=format command)
-Formatting metadata directory /tmp/kraft-combined-logs with metadata.version 4.3-IV0.
-
-```
-
-첫번째 kafka-broker01 세션을 복사하여 아래와 같이 입력 
-
--- create --topic 이름은 test.hello 
-~/confluent-8.3.0/bin/kafka-topics --bootstrap-server kafka-broker01:9092,kafka-broker02:9092,kafka-broker03:9092 --create --topic test.hello
-
-WARNING: Due to limitations in metric names, topics with a period ('.') or underscore ('_') could collide. To avoid issues it is best to use either, but not both.
-**Created topic test.hello.**
-
--- list (토픽 현황들을 보겠다)
-(.venv) ubuntu@kafka-broker01:~$ ~/confluent-8.3.0/bin/kafka-topics --bootstrap-server kafka-broker01:9092,kafka-broker02:9092,kafka-broker03:9092 --list
-test.hello
-
--- list (토픽 현황들을 보겠다)
-(.venv) ubuntu@kafka-broker01:~$ ~/confluent-8.3.0/bin/kafka-topics --bootstrap-server kafka-broker01:9092,kafka-broker02:9092,kafka-broker03:9092 --describe
-
-Topic: test.hello       TopicId: V5ovxmhjTuK6kIqJIyAQww PartitionCount: 1       ReplicationFactor: 1    Configs: min.insync.replicas=1,segment.bytes=1073741824
-        Topic: test.hello       Partition: 0    Leader: 2       Replicas: 2     Isr: 2  Elr:    LastKnownElr:
-
-
-
-1단계: 3대 서버 각각 카프카 전원 켜기 (1, 2, 3번 모두 실행)
-매번 창을 3개씩이나 '잠긴 상태'로 놔두면 모니터 화면이 부족하겠죠? 그래서 앞으로는 뒤에 -daemon을 붙여서 무대 뒤(백그라운드)로 깔끔하게 켜줍니다.
-
-3대의 서버 터미널에 각각 아래 명령어를 한 줄씩 던져주세요.
-
-```Bash
-~/confluent-8.3.0/bin/kafka-server-start -daemon ~/confluent-8.3.0/etc/kafka/server.properties
-# 확인
-~/confluent-8.3.0/bin$ ps -ef | grep server.properties
-kafka ~ 하는 자바 프로세스가 상단에 나오면 성공이다 
-
-```
-
-2단계: 1번 서버에서 파이썬 가상환경 켜기
-이제 내 작업실인 1번 서버(kafka-broker01) 창으로 와서 폴더로 이동하고 가상환경을 쏩니다.
-
-```Bash
-cd ~/kafka-project
-source .venv/bin/activate
-```
-
-3단계: 내 파이썬 코드 실행하기
-가상환경 앞에 (.venv)가 붙은 것을 확인했다면, 이따가 작성할 파이썬 프로듀서/컨슈머 코드를 실행하시면 됩니다!
-
-```Bash
-python 내_카프카_코드.py
-```
-
-🛑 퇴근 루틴 (서버 안전하게 끄는 법)
-실습을 마치고 가상머신을 끄거나 잠시 쉬고 싶을 때는, 카프카가 하드디스크에 데이터를 안전하게 저장하고 잠들 수 있도록 전원을 꺼주는 것이 좋습니다. 3대 서버 각각 아래 명령어를 치면 백그라운드에서 돌던 카프카가 얌전하게 종료됩니다.
-
-```Bash
-~/confluent-8.3.0/bin/kafka-server-stop
+Formatting metadata directory **/home/ubuntu/data/kafka-logs** with metadata.version 4.3-IV0.
 ```
 
 
-## producer와 consumer test 
-기존 3개의 서버를 아무거나 2개 복사 해서 하나는 producer, 다른 하나는 consumer 로 만든다
-첫번쨰 세션 복사: ~/confluent-8.3.0/bin/kafka-console-producer --bootstrap-server kafka-broker01:9092,kafka-broker02:9092,kafka-broker03:9092 --topic test.hello
-첫번째 세션 복사: ~/confluent-8.3.0/bin/kafka-console-consumer --bootstrap-server kafka-broker01:9092,kafka-broker02:9092,kafka-broker03:9092 --topic test.hello --from-beginning    # 
+#### 🔍 5단계: 생성된 메타데이터 장부 파일 검증
+
+포맷팅이 정상 완료되면 `~/data/kafka-logs/` 경로에 아래 두 파일이 자동 생성됩니다.
+
+1. **`meta.properties`:** 클러스터 고유 ID와 브로커 고유 번호(`node.id`)가 박제되는 영구 신분증 파일입니다. 3대 서버의 `cluster.id`가 일치해야 한 팀으로 묶입니다.
+   # 카프카 스토리지 메타데이터 서류
+   version=1
+   cluster.id=rgEz4HuGQnGnNk5y9onTzQ
+   node.id=102
+3. **`bootstrap.checkpoint`:** KRaft 메타데이터 장부의 최초 동기화 시작 지점(Offset 0)을 기록해 두는 이정표 파일입니다.
+   0
+   1
+**명령어 실행 후 내부 확인:**
+```bash
+cat ~/data/kafka-logs/meta.properties
 
 
 
+## 🚀 4. 카프카 브로커 클러스터 최종 기동 및 생사 확인
 
-## 보통은 producer 에서 바꾼다 topic 을 test.hello -> new로 수정 + 파티션 추가 
-**각 파티션끼리 데이터가 공유되지 않고 브로커(리더)가 존재한다**
-**파티션은 브로커수와 상관없이 늘리거나 줄일 수 있다**
+> [!TIP]
+> 3대 서버의 장부 파일(`meta.properties`) 검증이 완료되었다면, 아래 명령어를 통해 백그라운드 모드(`-daemon`)로 카프카 엔진의 첫 숨을 불어넣습니다.
 
-~/confluent-8.3.0/bin/kafka-topics --bootstrap-server kafka-broker01:9092,kafka-broker02:9092,kafka-broker03:9092 --create --topic new --partitions 3
+1, 2, 3번 가상머신 터미널 각각에 접속하여 아래 기동 명령어를 실행합니다.
 
-## producer와 consumer new 
-기존 3개의 서버를 아무거나 2개 복사 해서 하나는 producer, 다른 하나는 consumer 로 만든다
-첫번쨰 세션 복사: ~/confluent-8.3.0/bin/kafka-console-producer --bootstrap-server kafka-broker01:9092,kafka-broker02:9092,kafka-broker03:9092 --topic new
-첫번째 세션 복사: ~/confluent-8.3.0/bin/kafka-console-consumer --bootstrap-server kafka-broker01:9092,kafka-broker02:9092,kafka-broker03:9092 --topic new --from-beginning    # 
-
-
-
-
-
-파티션 + 복제본 
-**브로커 3대, 파티션3개, 복제본 3개 예시 : 파티션 3**
-**PRODUCER와 CONSUMER는 각 파티션 리더로부터 메시지를 받아와 동기화만 수행**
-**F는 (L)READER 와 동기화되어 데이터를 복제 하는데만 노력한다**
-
-**복제본 개수는 이란적으로 3개를 설정한다 가용성이 매우 중요하면 5개를 설정하는 경우도 존재하나, 브로커 개수를 초과하여 설정할 수 없다**
-**반드시 브로커와 파티션 갯수를 맞추는건 아니다 Producer, Consumer 성능에 따라 성능이 변화할 수있고 (특히 Consumer가 일을 더 많이 한다) 그래서 파티션 수는 정답이 없다 **
-~/confluent-8.3.0/bin/kafka-topics --bootstrap-server kafka-broker01:9092,kafka-broker02:9092,kafka-broker03:9092 --create --topic new --partitions 3 --replication-factor 3
-
-
-
-
-토픽 homework.ch4-5.ptt5-3으로 하되, 파티션 갯수를 5개, 복제본 갯수를 3개로 생성
-잘 만들었는지 확인 후, 리더가 어떤 노드에 있는지 어떻게 알 수있을까?
-
-~/confluent-8.3.0/bin/kafka-topics --bootstrap-server kafka-broker01:9092,kafka-broker02:9092,kafka-broker03:9092 --create --topic homework.ch4-5.ptt5-3 --partitions 5 --replication-factor 3
-Created topic homework.ch4-5.ptt5-3.
-
-
-
-~/confluent-8.3.0/bin/kafka-topics --bootstrap-server kafka-broker01:9092,kafka-broker02:9092,kafka-broker03:9092 --topic homework.ch4-5.ptt5-3 --describe
-Topic: homework.ch4-5.ptt5-3    TopicId: Y4s2NpipTBmC3yMONb9f3A PartitionCount: 5       ReplicationFactor: 3    Configs: min.insync.replicas=1,segment.bytes=1073741824
-        Topic: homework.ch4-5.ptt5-3    Partition: 0    Leader: 1       Replicas: 1,2,3 Isr: 1,2,3      Elr:    LastKnownElr:
-        Topic: homework.ch4-5.ptt5-3    Partition: 1    Leader: 2       Replicas: 2,3,1 Isr: 2,3,1      Elr:    LastKnownElr:
-        Topic: homework.ch4-5.ptt5-3    Partition: 2    Leader: 3       Replicas: 3,1,2 Isr: 3,1,2      Elr:    LastKnownElr:
-        Topic: homework.ch4-5.ptt5-3    Partition: 3    Leader: 1       Replicas: 1,3,2 Isr: 1,3,2      Elr:    LastKnownElr:
-        Topic: homework.ch4-5.ptt5-3    Partition: 4    Leader: 3       Replicas: 3,2,1 Isr: 3,2,1      Elr:    LastKnownElr:
-
-
-**브로커가 3개인데 3개 초과시 Broker 서버의 대수보다 많아 토픽을 생성할 수 없다는 에러가 나옴**
-
-
+```diff
+# 3대 서버 공통 카프카 엔진 백그라운드 가동
++ ~/confluent-8.3.0/bin/kafka-server-start -daemon ~/confluent-8.3.0/etc/kafka/server.properties
+# 프로세스 팩트 체크 명령어 실행
++ ps -ef | grep kafka
+```
 
 
