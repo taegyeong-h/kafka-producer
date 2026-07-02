@@ -133,4 +133,16 @@ cat ~/data/kafka-logs/meta.properties
 + ps -ef | grep kafka
 ```
 
+> [!TIP]
+> 로컬 ubu
+> 9092 포트 (PLAINTEXT) : "손님용 정문"
+> 역할: 파이참에서 짠 파이썬 코드(Producer)나 컨슈머 같은 외부 클라이언트(손님)들이 데이터를 집어넣고 빼가기 위해 노크하는 카프카 브로커의 정문
+
+방화벽 개방 필수 이유: 이 문이 닫혀있으면 외부의 파이참 클라이언트가 아예 서버 안으로 들어오질 못하네.
+> 9093 포트 (CONTROLLER) : " 뒷문 (합의체 통로)"
+> 손님들은 절대 못 들어오는, 오직 가상머신 삼형제(broker01, 02, 03)들끼리만 서로 밀담을 나누는 사내 비밀 통로
+> 3대 브로커 서버 모두 9092 ~ 9093 방화벽 해제 후 적용을 시켜줘야 한다
+sudo ufw allow 9092/tcp
+sudo ufw allow 9093/tcp
+sudo ufw reload
 
